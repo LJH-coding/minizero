@@ -7,13 +7,22 @@
 #include "ostream_redirector.h"
 #include "random.h"
 #include "zero_server.h"
+#include "base_actor.h"
+#include "network.h"
+#include "create_actor.h"
+#include "create_network.h"
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <thread>
+#include <iostream>
+#include <assert.h>
 
 namespace minizero::console {
 
 using namespace minizero::utils;
+using namespace minizero::network;
 
 ModeHandler::ModeHandler()
 {
@@ -23,6 +32,8 @@ ModeHandler::ModeHandler()
     RegisterFunction("zero_training_name", this, &ModeHandler::runZeroTrainingName);
     RegisterFunction("env_test", this, &ModeHandler::runEnvTest);
     RegisterFunction("env_test2", this, &ModeHandler::runEnvTest2);
+    RegisterFunction("env_test3", this, &ModeHandler::runEnvTest3);
+    RegisterFunction("env_evaluation", this, &ModeHandler::runEvaluation);
     RegisterFunction("remove_obs", this, &ModeHandler::runRemoveObs);
     RegisterFunction("recover_obs", this, &ModeHandler::runRecoverObs);
 }
@@ -180,6 +191,30 @@ void ModeHandler::runEnvTest()
     std::cout << env_loader.toString() << std::endl;
 }
 
+#include <termio.h>
+int getch(void)
+{
+    struct termios tm, tm_old;
+    int fd = 0, ch;
+    
+    if (tcgetattr(fd, &tm) < 0) {
+        return -1;
+    }
+    
+    tm_old = tm;
+    cfmakeraw(&tm);
+    if (tcsetattr(fd, TCSANOW, &tm) < 0) {
+        return -1;
+    }
+    
+    ch = getchar();
+    
+    if (tcsetattr(fd, TCSANOW, &tm_old) < 0) {
+        return -1;
+    }
+    
+    return ch;
+}
 void ModeHandler::runEnvTest2()
 {
     Environment env;
@@ -188,38 +223,41 @@ void ModeHandler::runEnvTest2()
 
     while (!env.isTerminal()) {
         system("clear");
+
         std::cout << env.toString() << std::endl;
 
-        std::vector<Action> legal_actions = env.getLegalActions();
-        std::cout << "Legal actions:" << std::endl;
-        for (size_t i = 0; i < legal_actions.size(); ++i) {
-            std::cout << i << ": " << legal_actions[i].toConsoleString() << ", ";
+        char ch = getch();
+
+        Action action;
+        switch(ch) {
+            case 'w':
+            case 'W':
+                action = Action({"U"});
+                break;
+            case 'a':
+            case 'A':
+                action = Action({"L"});
+                break;
+            case 'd':
+            case 'D':
+                action = Action({"R"});
+                break;
+            case 's':
+            case 'S':
+                action = Action({"D"});
+                break;
+            case ' ':
+                action = Action({"drop"});
+                break;
+            case 'q':
+            case 'Q':
+                std::cout << "Quitting the game." << std::endl;
+                return;
+            default:
+                action = Action({"no_action"});
         }
-        std::cout << std::endl;
 
-        std::string input;
-        std::cout << "Enter the index of your move (or 'q' to quit): ";
-        std::cin >> input;
-
-        if (input == "q" || input == "Q") {
-            std::cout << "Quitting the game." << std::endl;
-            break;
-        }
-
-        int index;
-        try {
-            index = std::stoi(input);
-        } catch (const std::exception&) {
-            std::cout << "Invalid input. Please enter a number." << std::endl;
-            continue;
-        }
-
-        if (index < 0 || index >= static_cast<int>(legal_actions.size())) {
-            std::cout << "Invalid move index. Please try again." << std::endl;
-            continue;
-        }
-
-        env.act(legal_actions[index]);
+        env.act(action);
     }
 
     std::cout << "Game over. Final state:" << std::endl;
@@ -229,6 +267,104 @@ void ModeHandler::runEnvTest2()
     env_loader.loadFromEnvironment(env);
     std::cout << "Game record:" << std::endl;
     std::cout << env_loader.toString() << std::endl;
+}
+
+void ModeHandler::runEnvTest3()
+{
+    Environment env;
+    std::string input;
+    std::string filepath;
+    std::cout << "Enter the SGF file path: ";
+    std::getline(std::cin, filepath);
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file: " << filepath << std::endl;
+        return;
+    }
+
+    while(std::getline(file, input)) {
+        EnvironmentLoader env_loader;
+        env_loader.loadFromString(input);
+        int seed = std::stoi(env_loader.getTag("SD"));
+        env.reset(seed);
+        auto actions = env_loader.getActionPairs();
+        std::cout << "Initial state:" << std::endl;
+        std::cout << env.toString() << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Pause for 0.5 seconds at the start
+
+        for (int i = 0; i < actions.size(); ++i) {
+            env.act(actions[i].first);
+            
+            // Clear the console (this is platform-dependent)
+            system("clear");
+
+            std::cout << "Move " << i + 1 << "/" << actions.size() << std::endl;
+            std::cout << "Action: " << actions[i].first.toConsoleString() << std::endl;
+            std::cout << env.toString() << std::endl;
+            std::cout << "Reward: " << env.getEvalScore() << std::endl;
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(150)); // Wait for 0.1 seconds
+        }
+
+        std::cout << "Game replay finished. Press Enter to continue or 'q' to quit." << std::endl;
+        std::string response;
+        std::getline(std::cin, response);
+        if (response == "q" || response == "Q") {
+            break;
+        }
+    }
+}
+
+void ModeHandler::runEvaluation()
+{
+    
+    std::shared_ptr<minizero::network::Network> network_;
+    std::shared_ptr<actor::BaseActor> actor_;
+    std::shared_ptr<network::AlphaZeroNetwork> alphazero_network_;
+    if (!network_) { network_ = createNetwork(config::nn_file_name, 0); }
+    if (!actor_) {
+        uint64_t tree_node_size = static_cast<uint64_t>(config::actor_num_simulation + 1) * network_->getActionSize();
+        actor_ = actor::createActor(tree_node_size, network_);
+    }
+    actor_->setNetwork(network_);
+    alphazero_network_ = std::static_pointer_cast<AlphaZeroNetwork>(network_);
+
+    float total_return = 0;
+    int n = 1;
+    bool attack = 0;
+    for (int iter = 0; iter < n; ++iter) {
+        actor_->reset();
+        while (!actor_->isEnvTerminal()) {
+            const Action action = actor_->think(false, true);
+            actor_->getEnvironment().act(action, !attack);
+            if(actor_->isEnvTerminal()) {
+                std::cout << actor_->getEnvironment().toString() << std::endl;
+                break;
+            }
+            if(attack) {
+                auto events = actor_->getEnvironment().getLegalChanceEvents();
+                float mn = 1e9+7;
+                auto worst_event = events[0];
+                for (auto event : events) {
+                    Environment env = actor_->getEnvironment();
+                    env.actChanceEvent(event);
+                    auto features = env.getFeatures();
+                    auto nn_evaluation_batch_id_ = alphazero_network_->pushBack(features);
+                    auto network_output = alphazero_network_->forward();
+                    auto output = network_output[nn_evaluation_batch_id_];
+                    std::shared_ptr<AlphaZeroNetworkOutput> alphazero_output = std::static_pointer_cast<AlphaZeroNetworkOutput>(output);
+                    auto value = alphazero_output->value_;
+                    if (value < mn) {
+                        mn = value;
+                        worst_event = event;
+                    }
+                }
+                actor_->getEnvironment().actChanceEvent(worst_event);
+            }
+        }
+        total_return += actor_->getEnvironment().getEvalScore();
+    }
+    std::cout << "Return: " << total_return / n << std::endl;
 }
 
 void ModeHandler::runRemoveObs()
