@@ -11,6 +11,7 @@ class TetrisBoard {
 public:
     static const int WIDTH = 10;
     static const int HEIGHT = 22;
+    static const int HISTORY = 1;
 
     // Colors
     static constexpr const char* RESET = "\033[0m";
@@ -73,6 +74,11 @@ public:
         return x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT;
     }
 
+    bool haveNoPiece() const
+    {
+        return current_piece_.empty();
+    }
+
     int clearFullLines()
     {
         int lines_cleared = 0;
@@ -83,6 +89,7 @@ public:
                 ++y; // Recheck this line
             }
         }
+        clearCurrentPiece();
         return lines_cleared;
     }
 
@@ -181,7 +188,6 @@ public:
 
     bool isAtBottom() const
     {
-        if (current_piece_.empty()) { return true; }
         TetrisBoard temp = *this;
         ++temp.current_piece_y_;
         return !temp.canPlacePiece();

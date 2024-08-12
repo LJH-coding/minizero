@@ -80,6 +80,8 @@ std::string env_gomoku_rule = "standard";
 bool env_gomoku_exactly_five_stones = true;
 bool env_hex_use_swap_rule = true;
 int env_rubiks_scramble_rotate = 5;
+int env_tetris_gap = 0;
+int bucket_repeat_nums = 1;
 
 void setConfiguration(ConfigureLoader& cl)
 {
@@ -172,7 +174,11 @@ void setConfiguration(ConfigureLoader& cl)
     cl.addParameter("env_gomoku_rule", env_gomoku_rule, "the opening rule in Gomoku: standard (standard Gomoku rule), outer_open (restricted first Black move)", "Environment");
     cl.addParameter("env_gomoku_exactly_five_stones", env_gomoku_exactly_five_stones, "true for standard Gomoku; false for freestyle Gomoku (allow winning with more than five stones, i.e., an overline)", "Environment");
 #elif RUBIKS
-    cl.addParameter("env_rubiks_scramble_rotate", env_rubiks_scramble_rotate, "the number random rotations from the initial state of a rubik's cube", "Enviroment");
+    cl.addParameter("env_rubiks_scramble_rotate", env_rubiks_scramble_rotate, "the number random rotations from the initial state of a rubik's cube", "Environment");
+#elif TETRIS
+    cl.addParameter("env_tetris_gap", env_tetris_gap, "The gap parameter defines the interval between chance events in the Tetris.", "Environment");
+    cl.addParameter("bucket_repeat_nums", bucket_repeat_nums, "Adversary bucket method evaluation, chance event repeat times in the bucket", "Evaluation");
+
 #endif
 
     // references

@@ -84,6 +84,8 @@ extern std::string env_gomoku_rule;
 extern bool env_gomoku_exactly_five_stones;
 extern bool env_hex_use_swap_rule;
 extern int env_rubiks_scramble_rotate;
+extern int env_tetris_gap;
+extern int bucket_repeat_nums;
 
 void setConfiguration(ConfigureLoader& cl);
 

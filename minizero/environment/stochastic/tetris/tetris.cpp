@@ -15,28 +15,21 @@ void TetrisEnv::reset(int seed)
     total_reward_ = 0;
 
     board_.clear();
-    turn_ = Player::kPlayerNone; //輪到 chance event
+    turn_ = Player::kPlayerNone; // chance event
     actChanceEvent();
-}
-
-void TetrisEnv::lockPiece() {
-    board_.placePiece();
-    int lines_cleared = board_.clearFullLines();
-    reward_ = lines_cleared * lines_cleared;
-    total_reward_ += reward_;
 }
 
 bool TetrisEnv::act(const TetrisAction& action, bool with_chance /* = true */)
 {
     if (turn_ != Player::kPlayer1) { return false; }
 
-    bool valid = false, goDown = false;
+    bool valid = false, lock = false;
     if (action.getActionID() == kTetrisDropActionID) {
+        lock = true;
         valid = board_.drop();
-        goDown = true;
     } else if (action.getActionID() == 3) { // down action
+        lock = board_.isAtBottom(); // if it is already at bottom, then it press down, it will be lock
         valid = board_.down();
-        goDown = true;
     } else {
         int rotation = action.getRotation();
         int movement = action.getMovement();
@@ -60,7 +53,7 @@ bool TetrisEnv::act(const TetrisAction& action, bool with_chance /* = true */)
         reward_ = 0;
         turn_ = Player::kPlayerNone;
 
-        if ((goDown || board_.getCounter() % kTetrisTime == 0) && board_.isAtBottom()) {
+        if ((lock || board_.getCounter() % (config::env_tetris_gap + 1) == 0) && board_.isAtBottom()) {
             board_.placePiece();
             int lines_cleared = board_.clearFullLines();
             reward_ = lines_cleared * lines_cleared;
@@ -102,11 +95,11 @@ bool TetrisEnv::actChanceEvent()
     if (turn_ != Player::kPlayerNone) { return false; }
     if (isTerminal()) { return false; }
 
-    if (board_.getCounter() % kTetrisTime != 0) {
-
+    if (board_.getCounter() % (config::env_tetris_gap + 1) != 0) {
+        // do nothing
     }
     else {
-        if (board_.isAtBottom()) {
+        if (board_.haveNoPiece()) {
             generateNewPiece(-1);
         } else {
             fall();
@@ -141,11 +134,11 @@ std::vector<TetrisAction> TetrisEnv::getLegalChanceEvents() const
     if (turn_ != Player::kPlayerNone) { return {}; }
     if (isTerminal()) { return {}; }
     std::vector<TetrisAction> events;
-    if (board_.getCounter() % kTetrisTime != 0) {
+    if (board_.getCounter() % (config::env_tetris_gap + 1) != 0) {
         events.push_back(TetrisChanceEvent::toAction(TetrisChanceEvent(TetrisChanceEvent::EventType::NoAction)));
     }
     else {
-        if (board_.isAtBottom()) {
+        if (board_.haveNoPiece()) {
             for (int i = 0; i < 7; ++i) {
                 events.push_back(TetrisChanceEvent::toAction(TetrisChanceEvent(TetrisChanceEvent::EventType::NewPiece, i)));
             }
@@ -158,11 +151,18 @@ std::vector<TetrisAction> TetrisEnv::getLegalChanceEvents() const
 
 float TetrisEnv::getChanceEventProbability(const TetrisAction& action) const
 {
+    if (turn_ != Player::kPlayerNone) { return 0; }
     TetrisChanceEvent event = TetrisChanceEvent::toChanceEvent(action);
     if (event.type_ == TetrisChanceEvent::EventType::NewPiece) {
-        return board_.isAtBottom() ? 1.0f / 7 : 0.0f;
+        return board_.haveNoPiece() ? 1.0f / 7 : 0.0f;
     } else {
-        return board_.isAtBottom() ? 0.0f : 1.0f;
+        if (board_.haveNoPiece()) return 0.0f;
+        if(event.type_ == TetrisChanceEvent::EventType::NoAction) {
+            return ((board_.getCounter() % (config::env_tetris_gap + 1) != 0) ? 1.0f : 0.0f);
+        }
+        else {
+            return ((board_.getCounter() % (config::env_tetris_gap + 1) != 0) ? 0.0f : 1.0f);
+        }
     }
 }
 
@@ -177,20 +177,20 @@ bool TetrisEnv::isLegalChanceEvent(const TetrisAction& action) const
 {
     TetrisChanceEvent event = TetrisChanceEvent::toChanceEvent(action);
     if(event.type_ == TetrisChanceEvent::EventType::NoAction) {
-        return board_.getCounter() % kTetrisTime != 0 && event.piece_type_ == 8 && action.getPlayer() == Player::kPlayerNone;
+        return turn_ == Player::kPlayerNone && (board_.getCounter() % (config::env_tetris_gap + 1) != 0) && action.getPlayer() == Player::kPlayerNone;
     }
     else {
         if (event.type_ == TetrisChanceEvent::EventType::NewPiece) {
-            return board_.isAtBottom() && event.piece_type_ >= 0 && event.piece_type_ < 7 && action.getPlayer() == Player::kPlayerNone;
+            return turn_ == Player::kPlayerNone && board_.haveNoPiece() && event.piece_type_ >= 0 && event.piece_type_ < 7 && action.getPlayer() == Player::kPlayerNone;
         } else {
-            return !board_.isAtBottom() && event.piece_type_ == 7 && action.getPlayer() == Player::kPlayerNone;
+            return turn_ == Player::kPlayerNone && !board_.haveNoPiece() && action.getPlayer() == Player::kPlayerNone;
         }
     }
 }
 
 bool TetrisEnv::isTerminal() const
 {
-    return board_.isGameOver();
+    return board_.isGameOver() || actions_.size() >= kTetrisStepLimit;
 }
 
 void TetrisEnv::generateNewPiece(int piece_type)
@@ -209,12 +209,12 @@ bool TetrisEnv::fall()
 std::vector<float> TetrisEnv::getFeatures(utils::Rotation rotation /*= utils::Rotation::kRotationNone*/) const
 {
     std::vector<float> features;
-    for (int y = 0; y < kTetrisBoardHeight; ++y) { // first channel
+    for (int y = 0; y < kTetrisBoardHeight; ++y) { // lock pieces
         for (int x = 0; x < kTetrisBoardWidth; ++x) {
             features.push_back(board_.isOccupied(x, y) ? 1.0f : 0.0f);
         }
     }
-    for (int y = 0; y < kTetrisBoardHeight; ++y) { // second channel
+    for (int y = 0; y < kTetrisBoardHeight; ++y) { // current pieces
         for (int x = 0; x < kTetrisBoardWidth; ++x) {
             features.push_back(board_.isCurrentPiece(x, y) ? 1.0f : 0.0f);
         }

@@ -16,8 +16,11 @@ const int kTetrisDiscreteValueSize = 601;
 const int kTetrisMaxMovement = 1;
 const int kTetrisActionSize = 6; // ULRD + drop + no_action
 const int kTetrisDropActionID = kTetrisActionSize - 2;
-const int kTetrisChanceEventSize = 8; // 7 tetromino types + 1 fall + no_action
-const int kTetrisTime = 2; // chance event period
+const int kTetrisNopActionID = kTetrisActionSize - 1;
+const int kTetrisChanceEventSize = 8; // 7 tetromino types + 1 fall + 1 no_action
+const int kTetrisStepLimit = 20480;
+const int kTetrisHistoryLength = 1;
+const std::string kTetrisActionName[] = {"up", "left", "right", "down", "drop", "nop", "null"};
 
 class TetrisAction : public BaseAction {
 public:
@@ -26,30 +29,22 @@ public:
     TetrisAction(const std::vector<std::string>& action_string_args)
     {
         assert(action_string_args.size() && action_string_args[0].size());
-
-        if (action_string_args[0] == "drop") {
-            action_id_ = kTetrisActionSize - 2;
-        } else if (action_string_args[0] == "no_action") {
-            action_id_ = kTetrisActionSize - 1;
-        } else {
-            std::string action_str = "ULRD";
-            for(action_id_ = 0; action_id_ < 4; ++action_id_) {
-                if(action_string_args[0][0] == action_str[action_id_]) {
-                    break;
-                }
-            }
-        }
         player_ = Player::kPlayer1;
+        if (action_string_args[0] == "drop") {
+            action_id_ = kTetrisDropActionID;
+            return;
+        }
+        if (action_string_args[0] == "nop") {
+            action_id_ = kTetrisNopActionID;
+            return;
+        }
+        action_id_ = std::string("ULRD").find(std::toupper(action_string_args[0][0]));
     }
 
     inline Player nextPlayer() const override { return Player::kPlayer1; }
     inline std::string toConsoleString() const
     {
-        if (action_id_ == kTetrisActionSize - 2) return "drop";
-        if (action_id_ == kTetrisActionSize - 1) return "no_action";
-        std::string action_str = "";
-        action_str.push_back("ULRD"[action_id_]);
-        return action_str;
+        return kTetrisActionName[action_id_];
     }
 
     int getRotation() const 
@@ -58,15 +53,9 @@ public:
     }
     int getMovement() const
     {
-        if(action_id_ == 1) {
-            return -1;
-        }
-        else if(action_id_ == 2) {
-            return 1;
-        }
-        else {
-            return 0;
-        }
+        if (action_id_ == 1) return -1; // L
+        if (action_id_ == 2) return 1; // R
+        return 0;
     }
 };
 
@@ -94,7 +83,7 @@ public:
     int getRotateAction(int action_id, utils::Rotation rotation) const override { return action_id; }
     std::vector<float> getFeatures(utils::Rotation rotation = utils::Rotation::kRotationNone) const override;
     std::vector<float> getActionFeatures(const TetrisAction& action, utils::Rotation rotation = utils::Rotation::kRotationNone) const override;
-    inline int getNumInputChannels() const override { return 2; } // feature channel nums
+    inline int getNumInputChannels() const override { return 2*kTetrisHistoryLength; } // feature channel nums
     inline int getNumActionFeatureChannels() const override { return 1; }
     inline int getInputChannelHeight() const override { return kTetrisBoardHeight; }
     inline int getInputChannelWidth() const override { return kTetrisBoardWidth; }

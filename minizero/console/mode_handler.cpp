@@ -18,6 +18,7 @@
 #include <thread>
 #include <iostream>
 #include <assert.h>
+#include <queue>
 
 namespace minizero::console {
 
@@ -31,9 +32,11 @@ ModeHandler::ModeHandler()
     RegisterFunction("zero_server", this, &ModeHandler::runZeroServer);
     RegisterFunction("zero_training_name", this, &ModeHandler::runZeroTrainingName);
     RegisterFunction("env_test", this, &ModeHandler::runEnvTest);
-    RegisterFunction("env_test2", this, &ModeHandler::runEnvTest2);
-    RegisterFunction("env_test3", this, &ModeHandler::runEnvTest3);
-    RegisterFunction("env_evaluation", this, &ModeHandler::runEvaluation);
+    RegisterFunction("play", this, &ModeHandler::runPlay);
+    RegisterFunction("sgf_replay", this, &ModeHandler::runSgfReplay);
+    RegisterFunction("evil_eval", this, &ModeHandler::runEvilEvaluation);
+    RegisterFunction("bucket_eval", this, &ModeHandler::runBucketEvaluation);
+    RegisterFunction("eval", this, &ModeHandler::runEvaluation);
     RegisterFunction("remove_obs", this, &ModeHandler::runRemoveObs);
     RegisterFunction("recover_obs", this, &ModeHandler::runRecoverObs);
 }
@@ -215,7 +218,7 @@ int getch(void)
     
     return ch;
 }
-void ModeHandler::runEnvTest2()
+void ModeHandler::runPlay()
 {
     Environment env;
     env.reset();
@@ -254,7 +257,7 @@ void ModeHandler::runEnvTest2()
                 std::cout << "Quitting the game." << std::endl;
                 return;
             default:
-                action = Action({"no_action"});
+                action = Action({"nop"});
         }
 
         env.act(action);
@@ -269,7 +272,7 @@ void ModeHandler::runEnvTest2()
     std::cout << env_loader.toString() << std::endl;
 }
 
-void ModeHandler::runEnvTest3()
+void ModeHandler::runSgfReplay()
 {
     Environment env;
     std::string input;
@@ -315,9 +318,17 @@ void ModeHandler::runEnvTest3()
     }
 }
 
-void ModeHandler::runEvaluation()
+void ModeHandler::printInfo(std::shared_ptr<actor::BaseActor> &actor_, int iter, int n, float total_return, float max_return)
 {
-    
+    std::cout << actor_->getEnvironment().toString() << std::endl;
+    std::cout << "Evaluating... " << iter + 1 << " / " << n << std::endl;
+    std::cout << "Avg Return: " << (total_return + actor_->getEnvironment().getEvalScore()) / (iter + 1) << std::endl;
+    std::cout << "Max Return: " << std::max(max_return, actor_->getEnvironment().getEvalScore()) << std::endl;
+    std::cout << "Current Return: " << actor_->getEnvironment().getEvalScore() << std::endl;
+}
+
+void ModeHandler::runEvilEvaluation()
+{
     std::shared_ptr<minizero::network::Network> network_;
     std::shared_ptr<actor::BaseActor> actor_;
     std::shared_ptr<network::AlphaZeroNetwork> alphazero_network_;
@@ -329,23 +340,85 @@ void ModeHandler::runEvaluation()
     actor_->setNetwork(network_);
     alphazero_network_ = std::static_pointer_cast<AlphaZeroNetwork>(network_);
 
-    float total_return = 0;
-    int n = 1;
-    bool attack = 0;
+    float total_return = 0, max_return = -1e9;
+    int n = 10;
     for (int iter = 0; iter < n; ++iter) {
         actor_->reset();
         while (!actor_->isEnvTerminal()) {
-            const Action action = actor_->think(false, true);
-            actor_->getEnvironment().act(action, !attack);
+            const Action action = actor_->think(false, false);
+            printInfo(actor_, iter, n, total_return, max_return);
+            actor_->getEnvironment().act(action, false);
             if(actor_->isEnvTerminal()) {
-                std::cout << actor_->getEnvironment().toString() << std::endl;
                 break;
             }
-            if(attack) {
-                auto events = actor_->getEnvironment().getLegalChanceEvents();
-                float mn = 1e9+7;
-                auto worst_event = events[0];
-                for (auto event : events) {
+            auto events = actor_->getEnvironment().getLegalChanceEvents();
+            float mn = 1e9+7;
+            auto worst_event = events[0];
+            for (auto event : events) {
+                Environment env = actor_->getEnvironment();
+                env.actChanceEvent(event);
+                auto features = env.getFeatures();
+                auto nn_evaluation_batch_id_ = alphazero_network_->pushBack(features);
+                auto network_output = alphazero_network_->forward();
+                auto output = network_output[nn_evaluation_batch_id_];
+                std::shared_ptr<AlphaZeroNetworkOutput> alphazero_output = std::static_pointer_cast<AlphaZeroNetworkOutput>(output);
+                auto value = alphazero_output->value_;
+                if (value < mn) {
+                    mn = value;
+                    worst_event = event;
+                }
+            }
+            actor_->getEnvironment().actChanceEvent(worst_event);
+        }
+        printInfo(actor_, iter, n, total_return, max_return);
+        total_return += actor_->getEnvironment().getEvalScore();
+        max_return = std::max(max_return, actor_->getEnvironment().getEvalScore());
+    }
+    std::cout << "Worst Event Evaluation" << std::endl;
+}
+
+void ModeHandler::runBucketEvaluation()
+{
+    std::shared_ptr<minizero::network::Network> network_;
+    std::shared_ptr<actor::BaseActor> actor_;
+    std::shared_ptr<network::AlphaZeroNetwork> alphazero_network_;
+    if (!network_) { network_ = createNetwork(config::nn_file_name, 0); }
+    if (!actor_) {
+        uint64_t tree_node_size = static_cast<uint64_t>(config::actor_num_simulation + 1) * network_->getActionSize();
+        actor_ = actor::createActor(tree_node_size, network_);
+    }
+    actor_->setNetwork(network_);
+    alphazero_network_ = std::static_pointer_cast<AlphaZeroNetwork>(network_);
+
+    float total_return = 0, max_return = -1e9;
+    int n = 10;
+    int k = config::bucket_repeat_nums; // bucket repeat constant
+    std::vector<minizero::env::tetris::TetrisAction> bucket;
+    for (int iter = 0; iter < n; ++iter) {
+        actor_->reset();
+        bucket.clear();
+        while (!actor_->isEnvTerminal()) {
+            const Action action = actor_->think(false, false);
+            printInfo(actor_, iter, n, total_return, max_return);
+            actor_->getEnvironment().act(action, false);
+            if(actor_->isEnvTerminal()) {
+                break;
+            }
+            if (bucket.empty()) {
+                for (int i = 0; i < 7; ++i) {
+                    for(int j = 0; j < k; ++j)
+                        bucket.push_back(minizero::env::tetris::TetrisAction(i, minizero::env::Player::kPlayerNone));
+                }
+            }
+
+            auto events = actor_->getEnvironment().getLegalChanceEvents();
+            auto worst_event = events[0];//{nop}, {fall}, {7 pieces}
+            int worst_event_id = -1;
+            float mn = 1e9;
+            // find worst legal chance event in the bucket
+            for (int i = 0; i < bucket.size(); ++i) {
+                auto &event = bucket[i];
+                if (actor_->getEnvironment().isLegalChanceEvent(event)) {
                     Environment env = actor_->getEnvironment();
                     env.actChanceEvent(event);
                     auto features = env.getFeatures();
@@ -357,14 +430,52 @@ void ModeHandler::runEvaluation()
                     if (value < mn) {
                         mn = value;
                         worst_event = event;
+                        worst_event_id = i;
                     }
                 }
-                actor_->getEnvironment().actChanceEvent(worst_event);
+            }
+            actor_->getEnvironment().actChanceEvent(worst_event);
+            if(worst_event_id != -1)
+                bucket.erase(bucket.begin() + worst_event_id);
+        }
+        printInfo(actor_, iter, n, total_return, max_return);
+        total_return += actor_->getEnvironment().getEvalScore();
+        max_return = std::max(max_return, actor_->getEnvironment().getEvalScore());
+    }
+    std::cout << "Bucket Method Evaluation" << std::endl;
+    std::cout << "Bucket Repeat Constant k = " << k << std::endl;
+}
+
+void ModeHandler::runEvaluation()
+{
+    std::shared_ptr<minizero::network::Network> network_;
+    std::shared_ptr<actor::BaseActor> actor_;
+    std::shared_ptr<network::AlphaZeroNetwork> alphazero_network_;
+    if (!network_) { network_ = createNetwork(config::nn_file_name, 0); }
+    if (!actor_) {
+        uint64_t tree_node_size = static_cast<uint64_t>(config::actor_num_simulation + 1) * network_->getActionSize();
+        actor_ = actor::createActor(tree_node_size, network_);
+    }
+    actor_->setNetwork(network_);
+    alphazero_network_ = std::static_pointer_cast<AlphaZeroNetwork>(network_);
+
+    float total_return = 0, max_return = -1e9;
+    int n = 10;
+    for (int iter = 0; iter < n; ++iter) {
+        actor_->reset();
+        while (!actor_->isEnvTerminal()) {
+            const Action action = actor_->think(false, false);
+            printInfo(actor_, iter, n, total_return, max_return);
+            actor_->getEnvironment().act(action, true);
+            if(actor_->isEnvTerminal()) {
+                break;
             }
         }
+        printInfo(actor_, iter, n, total_return, max_return);
         total_return += actor_->getEnvironment().getEvalScore();
+        max_return = std::max(max_return, actor_->getEnvironment().getEvalScore());
     }
-    std::cout << "Return: " << total_return / n << std::endl;
+    std::cout << "Stochastic Event Evaluation" << std::endl;
 }
 
 void ModeHandler::runRemoveObs()
