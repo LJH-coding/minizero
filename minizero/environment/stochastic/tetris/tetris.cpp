@@ -13,6 +13,7 @@ void TetrisEnv::reset(int seed)
     actions_.clear();
     reward_ = 0;
     total_reward_ = 0;
+    total_lines_ = 0;
 
     board_.clear();
     turn_ = Player::kPlayerNone; // chance event
@@ -56,7 +57,11 @@ bool TetrisEnv::act(const TetrisAction& action, bool with_chance /* = true */)
         if ((lock || board_.getCounter() % (config::env_tetris_gap + 1) == 0) && board_.isAtBottom()) {
             board_.placePiece();
             int lines_cleared = board_.clearFullLines();
-            reward_ = lines_cleared * lines_cleared;
+            if(config::env_tetris_reward_shaping)
+                reward_ = 1 + lines_cleared * lines_cleared * kTetrisBoardWidth;
+            else
+                reward_ = lines_cleared * lines_cleared;
+            total_lines_ += lines_cleared;
             total_reward_ += reward_;
             if (with_chance) {
                 actChanceEvent();
@@ -190,7 +195,7 @@ bool TetrisEnv::isLegalChanceEvent(const TetrisAction& action) const
 
 bool TetrisEnv::isTerminal() const
 {
-    return board_.isGameOver() || actions_.size() >= kTetrisStepLimit;
+    return board_.isGameOver();
 }
 
 void TetrisEnv::generateNewPiece(int piece_type)

@@ -11,7 +11,6 @@ class TetrisBoard {
 public:
     static const int WIDTH = 10;
     static const int HEIGHT = 22;
-    static const int HISTORY = 1;
 
     // Colors
     static constexpr const char* RESET = "\033[0m";

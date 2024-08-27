@@ -13,13 +13,10 @@ const int kTetrisNumPlayer = 1;
 const int kTetrisBoardWidth = 10;
 const int kTetrisBoardHeight = 22; // 20 + 2 buffer lines
 const int kTetrisDiscreteValueSize = 601;
-const int kTetrisMaxMovement = 1;
-const int kTetrisActionSize = 6; // ULRD + drop + no_action
+const int kTetrisActionSize = 6; // 4 ULRD + 1 drop + 1 no_action
 const int kTetrisDropActionID = kTetrisActionSize - 2;
 const int kTetrisNopActionID = kTetrisActionSize - 1;
-const int kTetrisChanceEventSize = 8; // 7 tetromino types + 1 fall + 1 no_action
-const int kTetrisStepLimit = 20480;
-const int kTetrisHistoryLength = 1;
+const int kTetrisChanceEventSize = 9; // 7 tetromino types + 1 fall + 1 no_action
 const std::string kTetrisActionName[] = {"up", "left", "right", "down", "drop", "nop", "null"};
 
 class TetrisAction : public BaseAction {
@@ -83,7 +80,7 @@ public:
     int getRotateAction(int action_id, utils::Rotation rotation) const override { return action_id; }
     std::vector<float> getFeatures(utils::Rotation rotation = utils::Rotation::kRotationNone) const override;
     std::vector<float> getActionFeatures(const TetrisAction& action, utils::Rotation rotation = utils::Rotation::kRotationNone) const override;
-    inline int getNumInputChannels() const override { return 2*kTetrisHistoryLength; } // feature channel nums
+    inline int getNumInputChannels() const override { return 2; } // feature channel nums
     inline int getNumActionFeatureChannels() const override { return 1; }
     inline int getInputChannelHeight() const override { return kTetrisBoardHeight; }
     inline int getInputChannelWidth() const override { return kTetrisBoardWidth; }
@@ -96,6 +93,7 @@ public:
     std::string name() const override { return kTetrisName; }
     int getNumPlayer() const override { return kTetrisNumPlayer; }
     float getReward() const override { return reward_; }
+    int getTotalLines() const { return total_lines_; }
     float getEvalScore(bool is_resign = false) const override { return total_reward_; }
 
 private:
@@ -117,6 +115,7 @@ private:
     TetrisBoard board_;
     int reward_;
     int total_reward_;
+    int total_lines_;
     void generateNewPiece(int piece_type);
     bool fall();
 };

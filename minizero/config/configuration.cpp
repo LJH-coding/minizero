@@ -81,7 +81,7 @@ bool env_gomoku_exactly_five_stones = true;
 bool env_hex_use_swap_rule = true;
 int env_rubiks_scramble_rotate = 5;
 int env_tetris_gap = 0;
-int bucket_repeat_nums = 1;
+bool env_tetris_reward_shaping = false;
 
 void setConfiguration(ConfigureLoader& cl)
 {
@@ -177,7 +177,7 @@ void setConfiguration(ConfigureLoader& cl)
     cl.addParameter("env_rubiks_scramble_rotate", env_rubiks_scramble_rotate, "the number random rotations from the initial state of a rubik's cube", "Environment");
 #elif TETRIS
     cl.addParameter("env_tetris_gap", env_tetris_gap, "The gap parameter defines the interval between chance events in the Tetris.", "Environment");
-    cl.addParameter("bucket_repeat_nums", bucket_repeat_nums, "Adversary bucket method evaluation, chance event repeat times in the bucket", "Evaluation");
+    cl.addParameter("env_tetris_reward_shaping", env_tetris_reward_shaping, "Enable reward shaping in tetris game. (Default is false)", "Environment");
 
 #endif
 

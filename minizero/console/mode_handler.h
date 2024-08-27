@@ -1,7 +1,6 @@
 #pragma once
 
 #include "configuration.h"
-#include "base_actor.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -48,12 +47,6 @@ protected:
     virtual void runZeroServer();
     virtual void runZeroTrainingName();
     virtual void runEnvTest();
-    virtual void runPlay();
-    virtual void runSgfReplay();
-    virtual void printInfo(std::shared_ptr<actor::BaseActor> &actor_, int iter, int n, float total_return, float max_return);
-    virtual void runEvilEvaluation();
-    virtual void runBucketEvaluation();
-    virtual void runEvaluation();
     virtual void runRemoveObs();
     virtual void runRecoverObs();
 
